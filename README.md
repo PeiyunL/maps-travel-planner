@@ -41,6 +41,11 @@ A Chrome extension that enhances Google Maps with a visual travel planning syste
 - Route optimization
 - Sharing trips
 
+## Demo
+
+![Map View](screenshots/map.png)
+![Routes](screenshots/routes.png)
+
 ## Author
 
 Peiyun Li
