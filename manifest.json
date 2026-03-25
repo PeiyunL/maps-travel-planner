@@ -1,0 +1,16 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Maps Travel Planner Pro",
+  "description": "Visual trip planning overlay for Google Maps.",
+  "version": "0.1.0",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.google.com/maps/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://www.google.com/maps/*"],
+      "js": ["src/extension/content.js"],
+      "css": ["src/ui/shell.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
