@@ -557,6 +557,38 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35), 0 5px 14px rgba(0, 0, 0, 0.25);
 }
 
+.mtp-marker-wrap {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.mtp-marker-title {
+  position: absolute;
+  left: 50%;
+  top: -10px;
+  transform: translate(-50%, -100%);
+  max-width: 140px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  pointer-events: none;
+}
+
+.mtp-marker-wrap .mtp-marker {
+  position: static;
+  transform: none;
+  pointer-events: auto;
+}
+
 .mtp-modal-backdrop {
   position: fixed;
   inset: 0;

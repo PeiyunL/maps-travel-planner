@@ -43,8 +43,8 @@ A Chrome extension that enhances Google Maps with a visual travel planning syste
 
 ## Demo
 
-![Map View](screenshots/map.png)
-![Routes](screenshots/routes.png)
+![Planner Overview](screenshots/planner-overview.png)
+![Routes In Action](screenshots/routes-in-action.png)
 
 ## Author
 

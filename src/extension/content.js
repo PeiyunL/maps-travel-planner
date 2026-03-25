@@ -25017,20 +25017,30 @@
         markers.map((marker) => {
           const dayColor = getDayColor(marker.day);
           const isConnectSelected = connectSelection.includes(marker.id);
-          return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
-            "button",
+          return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+            "div",
             {
-              type: "button",
-              className: `mtp-marker${isConnectSelected ? " mtp-marker--connect-selected" : ""}`,
-              style: { left: `${marker.x}px`, top: `${marker.y}px`, backgroundColor: dayColor },
-              onClick: (event) => {
-                if (paused) return;
-                event.preventDefault();
-                event.stopPropagation();
-                onMarkerMapClick(marker.id);
-              },
-              title: `${marker.title} (Day ${marker.day})`,
-              children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: marker.order })
+              className: "mtp-marker-wrap",
+              style: { left: `${marker.x}px`, top: `${marker.y}px` },
+              children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { className: "mtp-marker-title", children: marker.title || "Untitled" }),
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    className: `mtp-marker${isConnectSelected ? " mtp-marker--connect-selected" : ""}`,
+                    style: { backgroundColor: dayColor },
+                    onClick: (event) => {
+                      if (paused) return;
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onMarkerMapClick(marker.id);
+                    },
+                    title: `${marker.title} (Day ${marker.day})`,
+                    children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: marker.order })
+                  }
+                )
+              ]
             },
             marker.id
           );

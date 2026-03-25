@@ -533,21 +533,27 @@ export function PlannerShell({
           const dayColor = getDayColor(marker.day);
           const isConnectSelected = connectSelection.includes(marker.id);
           return (
-            <button
+            <div
               key={marker.id}
-              type="button"
-              className={`mtp-marker${isConnectSelected ? " mtp-marker--connect-selected" : ""}`}
-              style={{ left: `${marker.x}px`, top: `${marker.y}px`, backgroundColor: dayColor }}
-              onClick={(event) => {
-                if (paused) return;
-                event.preventDefault();
-                event.stopPropagation();
-                onMarkerMapClick(marker.id);
-              }}
-              title={`${marker.title} (Day ${marker.day})`}
+              className="mtp-marker-wrap"
+              style={{ left: `${marker.x}px`, top: `${marker.y}px` }}
             >
-              <span>{marker.order}</span>
-            </button>
+              <span className="mtp-marker-title">{marker.title || "Untitled"}</span>
+              <button
+                type="button"
+                className={`mtp-marker${isConnectSelected ? " mtp-marker--connect-selected" : ""}`}
+                style={{ backgroundColor: dayColor }}
+                onClick={(event) => {
+                  if (paused) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onMarkerMapClick(marker.id);
+                }}
+                title={`${marker.title} (Day ${marker.day})`}
+              >
+                <span>{marker.order}</span>
+              </button>
+            </div>
           );
         })}
       </div>
