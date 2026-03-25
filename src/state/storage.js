@@ -9,6 +9,7 @@ export function createDefaultPlannerState() {
     manualEdges: [],
     autoVehiclesByKey: {},
     connectionMode: "auto",
+    routeRenderMode: "straight",
     activeDay: 1,
     allowCrossDayConnections: false,
     visibleDays: {}
@@ -51,11 +52,12 @@ export function loadPlannerWorkspace() {
       const migratedTrip = {
         ...baseTrip,
         ...(legacyPlanner || {}),
-        markers: legacyPlanner ? legacyPlanner.markers || [] : legacyMarkers,
-        manualEdges: legacyPlanner ? legacyPlanner.manualEdges || [] : [],
-        autoVehiclesByKey: legacyPlanner ? legacyPlanner.autoVehiclesByKey || {} : {},
-        visibleDays: legacyPlanner ? legacyPlanner.visibleDays || {} : {}
-      };
+      markers: legacyPlanner ? legacyPlanner.markers || [] : legacyMarkers,
+      manualEdges: legacyPlanner ? legacyPlanner.manualEdges || [] : [],
+      autoVehiclesByKey: legacyPlanner ? legacyPlanner.autoVehiclesByKey || {} : {},
+      routeRenderMode: "straight",
+      visibleDays: legacyPlanner ? legacyPlanner.visibleDays || {} : {}
+    };
 
       resolve({
         currentTripId: migratedTrip.id,
@@ -136,6 +138,7 @@ function normalizeWorkspace(workspace) {
       autoVehiclesByKey: isObject(raw.autoVehiclesByKey) ? raw.autoVehiclesByKey : {},
       visibleDays: isObject(raw.visibleDays) ? raw.visibleDays : {},
       connectionMode: raw.connectionMode === "manual" ? "manual" : "auto",
+      routeRenderMode: "straight",
       activeDay: Math.max(1, Number(raw.activeDay) || 1),
       allowCrossDayConnections: Boolean(raw.allowCrossDayConnections)
     };

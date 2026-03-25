@@ -27,6 +27,7 @@ export function PlannerShell({
   paused,
   connectionMode,
   activeDay,
+  dayTravelSummary,
   allowCrossDayConnections,
   connectSelection,
   onTogglePause,
@@ -152,6 +153,19 @@ export function PlannerShell({
   const handleDeleteSelected = () => {
     if (!selectedForDelete.length) return;
     onDeleteMarkers(selectedForDelete);
+    setSelectedForDelete([]);
+  };
+
+  const handleSelectAllVisible = () => {
+    if (!visibleMarkers.length) return;
+    setSelectedForDelete((prev) => {
+      const next = new Set(prev);
+      visibleMarkers.forEach((marker) => next.add(marker.id));
+      return [...next];
+    });
+  };
+
+  const handleClearSelected = () => {
     setSelectedForDelete([]);
   };
 
@@ -288,7 +302,32 @@ export function PlannerShell({
             </label>
           </div>
 
+          <div className="mtp-day-summary">
+            <h3>Day {dayTravelSummary?.day || activeDay} Travel</h3>
+            <p><strong>{dayTravelSummary?.totalDurationText || "0 min"}</strong> total travel time</p>
+            <p><strong>{dayTravelSummary?.totalDistanceText || "0 m"}</strong> total distance</p>
+            <p>{dayTravelSummary?.segments || 0} route segment(s)</p>
+          </div>
+
           <div className="mtp-bulk-actions">
+            <div className="mtp-bulk-actions-row">
+              <button
+                type="button"
+                className="mtp-btn"
+                onClick={handleSelectAllVisible}
+                disabled={paused || visibleMarkers.length === 0}
+              >
+                Select All Day {activeDay}
+              </button>
+              <button
+                type="button"
+                className="mtp-btn"
+                onClick={handleClearSelected}
+                disabled={paused || selectedForDelete.length === 0}
+              >
+                Clear
+              </button>
+            </div>
             <button
               type="button"
               className="mtp-btn mtp-btn--danger"
@@ -322,6 +361,7 @@ export function PlannerShell({
                   <option value="walking">Walking</option>
                   <option value="biking">Biking</option>
                   <option value="transit">Transit</option>
+                  <option value="airplane">Airplane</option>
                 </select>
               </label>
               <button
@@ -421,18 +461,24 @@ export function PlannerShell({
         <svg className="mtp-edge-layer" aria-hidden="true">
           {edges.map((edge) => {
             const d = edge.points.map((p, idx) => `${idx === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+            const isSelected = selectedEdge?.id === edge.id;
+            const hasActiveSelection = Boolean(selectedEdge);
             return (
-              <path
-                key={edge.id}
-                d={d}
-                className={`mtp-edge${selectedEdge?.id === edge.id ? " mtp-edge--selected" : ""}`}
-                onClick={(event) => {
-                  if (paused) return;
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onEdgeClick(edge.id);
-                }}
-              />
+              <g key={edge.id}>
+                {isSelected ? <path d={d} className="mtp-edge-focus" /> : null}
+                <path
+                  d={d}
+                  className={`mtp-edge mtp-edge--${edge.vehicleType}${isSelected ? " mtp-edge--selected" : ""}${
+                    hasActiveSelection && !isSelected ? " mtp-edge--dimmed" : ""
+                  }`}
+                  onClick={(event) => {
+                    if (paused) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onEdgeClick(edge.id);
+                  }}
+                />
+              </g>
             );
           })}
         </svg>
@@ -442,7 +488,9 @@ export function PlannerShell({
             <button
               key={`label_${edge.id}`}
               type="button"
-              className={`mtp-edge-label${selectedEdge?.id === edge.id ? " mtp-edge-label--selected" : ""}`}
+              className={`mtp-edge-label${selectedEdge?.id === edge.id ? " mtp-edge-label--selected" : ""}${
+                selectedEdge && selectedEdge.id !== edge.id ? " mtp-edge-label--dimmed" : ""
+              }`}
               style={{ left: `${edge.midpoint.x}px`, top: `${edge.midpoint.y}px` }}
               onClick={(event) => {
                 if (paused) return;
@@ -457,6 +505,29 @@ export function PlannerShell({
             </button>
           ))}
         </div>
+
+        {selectedEdge ? (
+          <div className="mtp-edge-endpoints" aria-hidden="true">
+            <span
+              className="mtp-edge-endpoint mtp-edge-endpoint--start"
+              style={{
+                left: `${selectedEdge.points[0]?.x || 0}px`,
+                top: `${selectedEdge.points[0]?.y || 0}px`
+              }}
+            >
+              Start
+            </span>
+            <span
+              className="mtp-edge-endpoint mtp-edge-endpoint--end"
+              style={{
+                left: `${selectedEdge.points[selectedEdge.points.length - 1]?.x || 0}px`,
+                top: `${selectedEdge.points[selectedEdge.points.length - 1]?.y || 0}px`
+              }}
+            >
+              End
+            </span>
+          </div>
+        ) : null}
 
         {markers.map((marker) => {
           const dayColor = getDayColor(marker.day);

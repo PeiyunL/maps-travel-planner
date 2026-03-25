@@ -13,6 +13,9 @@ import {
 } from "../state/storage.js";
 
 const ROOT_ID = "mtp-root";
+const LONG_DISTANCE_AIR_KM = 350;
+const ROUTE_FETCH_LIMIT = 4;
+const ROUTE_FETCH_RETRY_LIMIT = 2;
 
 function App() {
   const [markers, setMarkers] = useState(createDefaultPlannerState().markers);
@@ -26,6 +29,7 @@ function App() {
   const [visibleDays, setVisibleDays] = useState(createDefaultPlannerState().visibleDays);
   const [manualEdges, setManualEdges] = useState(createDefaultPlannerState().manualEdges);
   const [autoVehiclesByKey, setAutoVehiclesByKey] = useState(createDefaultPlannerState().autoVehiclesByKey);
+  const [routeRenderMode] = useState("straight");
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [connectSelection, setConnectSelection] = useState([]);
   const [mapRect, setMapRect] = useState(null);
@@ -39,6 +43,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [routeDataByKey, setRouteDataByKey] = useState({});
+  const routeFetchAttemptsRef = useRef(new Map());
 
   const pushToast = (kind, message) => {
     const id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
@@ -108,6 +114,7 @@ function App() {
         manualEdges,
         autoVehiclesByKey,
         connectionMode,
+        routeRenderMode: "straight",
         activeDay,
         allowCrossDayConnections,
         visibleDays,
@@ -269,10 +276,12 @@ function App() {
     };
   }, [mapRect, mapView, markers, paused, activeDay]);
 
+  const orderedMarkers = useMemo(() => sortMarkers(markers), [markers]);
+
   const markerPins = useMemo(() => {
     if (!mapRect || !mapView) return [];
 
-    return markers.map((marker) => {
+    return orderedMarkers.map((marker) => {
       const pixel = latLngToPixel({ lat: marker.lat, lng: marker.lng }, mapRect, mapView);
       return {
         ...marker,
@@ -280,7 +289,13 @@ function App() {
         y: pixel.y
       };
     });
-  }, [markers, mapRect, mapView]);
+  }, [orderedMarkers, mapRect, mapView]);
+
+  const markerDataById = useMemo(() => {
+    const map = new Map();
+    orderedMarkers.forEach((m) => map.set(m.id, m));
+    return map;
+  }, [orderedMarkers]);
 
   const markerById = useMemo(() => {
     const map = new Map();
@@ -299,6 +314,8 @@ function App() {
 
     const metrics = {
       icon: getVehicleIcon(vehicleType),
+      distanceKm,
+      durationMinutes,
       distanceText: formatDistance(distanceKm),
       durationText: formatDuration(durationMinutes)
     };
@@ -310,28 +327,46 @@ function App() {
   }, []);
 
   const buildEdgePayload = useCallback(
-    (id, from, to, vehicleType, mode) => {
-      const metrics = getRouteMetrics(from, to, vehicleType);
+    (id, from, to, vehicleType, mode, routeKey) => {
+      const routeData = routeDataByKey[routeKey];
+      const metrics = routeData || getRouteMetrics(from, to, vehicleType);
+      const routedPoints =
+      routeRenderMode === "road" && routeData?.path?.length && mapRect && mapView
+          ? routeData.path
+              .map((point) => latLngToPixel(point, mapRect, mapView))
+              .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+          : null;
+
+      const points =
+        routedPoints && routedPoints.length >= 2
+          ? routedPoints
+          : [
+              { x: from.x, y: from.y },
+              { x: to.x, y: to.y }
+            ];
+      const midpoint =
+        computePolylineMidpoint(points) || {
+          x: (from.x + to.x) / 2,
+          y: (from.y + to.y) / 2
+        };
+
       return {
         id,
+        routeKey,
         mode,
         fromMarkerId: from.id,
         toMarkerId: to.id,
         vehicleType,
         icon: metrics.icon,
+        distanceKm: Number(metrics.distanceKm) || 0,
+        durationMinutes: Number(metrics.durationMinutes) || 0,
         distanceText: metrics.distanceText,
         durationText: metrics.durationText,
-        midpoint: {
-          x: (from.x + to.x) / 2,
-          y: (from.y + to.y) / 2
-        },
-        points: [
-          { x: from.x, y: from.y },
-          { x: to.x, y: to.y }
-        ]
+        midpoint,
+        points
       };
     },
-    [getRouteMetrics]
+    [getRouteMetrics, routeDataByKey, mapRect, mapView, routeRenderMode]
   );
 
   const dayNumbers = useMemo(() => {
@@ -372,8 +407,12 @@ function App() {
       const from = markerPins[i];
       const to = markerPins[i + 1];
       if (!allowCrossDayConnections && Number(from.day) !== Number(to.day)) continue;
-      const vehicleType = autoVehiclesByKey[`${from.id}->${to.id}`] || "driving";
-      list.push(buildEdgePayload(`a_${from.id}_${to.id}`, from, to, vehicleType, "auto"));
+      const autoKey = `${from.id}->${to.id}`;
+      const vehicleType =
+        autoVehiclesByKey[autoKey] ||
+        (haversineKm(from, to) >= LONG_DISTANCE_AIR_KM ? "airplane" : "driving");
+      const routeKey = `auto:${autoKey}:${vehicleType}`;
+      list.push(buildEdgePayload(`a_${from.id}_${to.id}`, from, to, vehicleType, "auto", routeKey));
     }
     return list;
   }, [markerPins, autoVehiclesByKey, allowCrossDayConnections, buildEdgePayload]);
@@ -384,12 +423,139 @@ function App() {
         const from = markerById.get(edge.fromMarkerId);
         const to = markerById.get(edge.toMarkerId);
         if (!from || !to) return null;
-        return buildEdgePayload(edge.id, from, to, edge.vehicleType || "driving", "manual");
+        const vehicleType = edge.vehicleType || (haversineKm(from, to) >= LONG_DISTANCE_AIR_KM ? "airplane" : "driving");
+        const routeKey = `manual:${edge.id}:${edge.fromMarkerId}->${edge.toMarkerId}:${vehicleType}`;
+        return buildEdgePayload(edge.id, from, to, vehicleType, "manual", routeKey);
       })
       .filter(Boolean);
   }, [manualEdges, markerById, buildEdgePayload]);
 
+  const routeCandidates = useMemo(() => {
+    const candidates = [];
+
+    if (routeRenderMode !== "road") return candidates;
+
+    if (connectionMode === "manual") {
+      manualEdges.forEach((edge) => {
+        const from = markerDataById.get(edge.fromMarkerId);
+        const to = markerDataById.get(edge.toMarkerId);
+        if (!from || !to) return;
+
+        const vehicleType = edge.vehicleType || (haversineKm(from, to) >= LONG_DISTANCE_AIR_KM ? "airplane" : "driving");
+        if (!supportsExternalRouting(vehicleType)) return;
+        candidates.push({
+          key: `manual:${edge.id}:${edge.fromMarkerId}->${edge.toMarkerId}:${vehicleType}`,
+          from,
+          to,
+          vehicleType
+        });
+      });
+      return candidates;
+    }
+
+    if (orderedMarkers.length < 2) return candidates;
+    for (let i = 0; i < orderedMarkers.length - 1; i += 1) {
+      const from = orderedMarkers[i];
+      const to = orderedMarkers[i + 1];
+      if (!allowCrossDayConnections && Number(from.day) !== Number(to.day)) continue;
+
+      const autoKey = `${from.id}->${to.id}`;
+      const vehicleType =
+        autoVehiclesByKey[autoKey] ||
+        (haversineKm(from, to) >= LONG_DISTANCE_AIR_KM ? "airplane" : "driving");
+      if (!supportsExternalRouting(vehicleType)) continue;
+      candidates.push({
+        key: `auto:${autoKey}:${vehicleType}`,
+        from,
+        to,
+        vehicleType
+      });
+    }
+
+    return candidates;
+  }, [connectionMode, manualEdges, markerDataById, orderedMarkers, allowCrossDayConnections, autoVehiclesByKey, routeRenderMode]);
+
+  useEffect(() => {
+    if (!routeCandidates.length) return;
+
+    const validKeys = new Set(routeCandidates.map((c) => c.key));
+    routeFetchAttemptsRef.current.forEach((_value, key) => {
+      if (!validKeys.has(key)) routeFetchAttemptsRef.current.delete(key);
+    });
+    setRouteDataByKey((prev) => {
+      let changed = false;
+      const next = {};
+      Object.keys(prev).forEach((key) => {
+        if (validKeys.has(key)) {
+          next[key] = prev[key];
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [routeCandidates]);
+
+  useEffect(() => {
+    if (!routeCandidates.length) return;
+    const pending = routeCandidates
+      .filter((candidate) => {
+        if (routeDataByKey[candidate.key]) return false;
+        const attempts = routeFetchAttemptsRef.current.get(candidate.key) || 0;
+        return attempts < ROUTE_FETCH_RETRY_LIMIT;
+      })
+      .slice(0, ROUTE_FETCH_LIMIT);
+    if (!pending.length) return;
+
+    let cancelled = false;
+
+    (async () => {
+      for (const candidate of pending) {
+        if (cancelled) break;
+        const attempts = routeFetchAttemptsRef.current.get(candidate.key) || 0;
+        routeFetchAttemptsRef.current.set(candidate.key, attempts + 1);
+        try {
+          const route = await fetchRouteData(candidate.from, candidate.to, candidate.vehicleType);
+          if (cancelled || !route) continue;
+          setRouteDataByKey((prev) => (prev[candidate.key] ? prev : { ...prev, [candidate.key]: route }));
+        } catch {
+          // Keep straight-line fallback if routing request fails.
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [routeCandidates, routeDataByKey]);
+
   const edges = connectionMode === "manual" ? manualRenderedEdges : autoEdges;
+  const dayTravelSummary = useMemo(() => {
+    const targetDay = Number(activeDay) || 1;
+    let totalMinutes = 0;
+    let totalDistanceKm = 0;
+    let segments = 0;
+
+    edges.forEach((edge) => {
+      const from = markerById.get(edge.fromMarkerId);
+      const to = markerById.get(edge.toMarkerId);
+      if (!from || !to) return;
+      if (Number(from.day) !== targetDay || Number(to.day) !== targetDay) return;
+      totalMinutes += Number(edge.durationMinutes) || 0;
+      totalDistanceKm += Number(edge.distanceKm) || 0;
+      segments += 1;
+    });
+
+    return {
+      day: targetDay,
+      segments,
+      totalMinutes,
+      totalDistanceKm,
+      totalDurationText: formatDuration(totalMinutes),
+      totalDistanceText: formatDistance(totalDistanceKm)
+    };
+  }, [edges, markerById, activeDay]);
+
   const visibleMarkerPins = useMemo(
     () => markerPins.filter((marker) => visibleDays[Number(marker.day)] !== false),
     [markerPins, visibleDays]
@@ -419,6 +585,18 @@ function App() {
     setSelectedEdgeId(null);
     setConnectSelection([]);
   }, [paused]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      setSelectedEdgeId(null);
+      setSelectedMarkerId(null);
+      setConnectSelection([]);
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   useEffect(() => {
     if (!selectedEdgeId) return;
@@ -581,6 +759,7 @@ function App() {
       manualEdges,
       autoVehiclesByKey,
       connectionMode,
+      routeRenderMode: "straight",
       activeDay,
       allowCrossDayConnections,
       visibleDays
@@ -621,6 +800,7 @@ function App() {
           manualEdges,
           autoVehiclesByKey,
           connectionMode,
+          routeRenderMode: "straight",
           activeDay,
           allowCrossDayConnections,
           visibleDays
@@ -676,6 +856,7 @@ function App() {
       manualEdges,
       autoVehiclesByKey,
       connectionMode,
+      routeRenderMode: "straight",
       activeDay,
       allowCrossDayConnections,
       visibleDays
@@ -761,6 +942,7 @@ function App() {
       paused={paused}
       connectionMode={connectionMode}
       activeDay={activeDay}
+      dayTravelSummary={dayTravelSummary}
       allowCrossDayConnections={allowCrossDayConnections}
       connectSelection={connectSelection}
       onTogglePause={() => setPaused((prev) => !prev)}
@@ -929,6 +1111,7 @@ function buildTripSnapshot(baseTrip, planner) {
     manualEdges: planner.manualEdges || [],
     autoVehiclesByKey: planner.autoVehiclesByKey || {},
     connectionMode: planner.connectionMode || "auto",
+    routeRenderMode: planner.routeRenderMode === "straight" ? "straight" : "road",
     activeDay: Math.max(1, Number(planner.activeDay) || 1),
     allowCrossDayConnections: Boolean(planner.allowCrossDayConnections),
     visibleDays: planner.visibleDays || {},
@@ -980,7 +1163,8 @@ function getVehicleSpeed(vehicleType) {
     walking: 5,
     biking: 15,
     driving: 40,
-    transit: 30
+    transit: 30,
+    airplane: 700
   };
   return byType[vehicleType] || byType.driving;
 }
@@ -990,13 +1174,357 @@ function getVehicleIcon(vehicleType) {
     walking: "\uD83D\uDEB6",
     biking: "\uD83D\uDEB2",
     driving: "\uD83D\uDE97",
-    transit: "\uD83D\uDE8C"
+    transit: "\uD83D\uDE8C",
+    airplane: "\u2708\uFE0F"
   };
   return byType[vehicleType] || byType.driving;
 }
 
 function roundCoord(value) {
   return Number(value || 0).toFixed(5);
+}
+
+function supportsExternalRouting(vehicleType) {
+  return vehicleType === "driving" || vehicleType === "walking" || vehicleType === "biking" || vehicleType === "transit";
+}
+
+function mapVehicleToOsrmProfile(vehicleType) {
+  if (vehicleType === "biking") return "cycling";
+  if (vehicleType === "walking") return "walking";
+  return "driving";
+}
+
+async function fetchRouteData(from, to, vehicleType) {
+  if (vehicleType === "transit") {
+    return fetchTransitRouteData(from, to);
+  }
+
+  const route = await fetchRoadRoute(from, to, vehicleType);
+  if (!route || !route.path.length) return null;
+
+  return {
+    icon: getVehicleIcon(vehicleType),
+    distanceKm: route.distanceKm,
+    durationMinutes: route.durationMinutes,
+    distanceText: formatDistance(route.distanceKm),
+    durationText: formatDuration(route.durationMinutes),
+    path: route.path
+  };
+}
+
+function simplifyPath(points, maxPoints) {
+  if (!Array.isArray(points)) return [];
+  if (points.length <= maxPoints) return points;
+  const step = Math.max(1, Math.ceil(points.length / maxPoints));
+  const out = [];
+  for (let i = 0; i < points.length; i += step) {
+    out.push(points[i]);
+  }
+  const last = points[points.length - 1];
+  if (out[out.length - 1] !== last) out.push(last);
+  return out;
+}
+
+function computePolylineMidpoint(points) {
+  if (!Array.isArray(points) || points.length === 0) return null;
+  if (points.length === 1) return points[0];
+  if (points.length === 2) {
+    return {
+      x: (points[0].x + points[1].x) / 2,
+      y: (points[0].y + points[1].y) / 2
+    };
+  }
+
+  let total = 0;
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const a = points[i];
+    const b = points[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    segments.push({ a, b, len });
+    total += len;
+  }
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return {
+      x: (points[0].x + points[points.length - 1].x) / 2,
+      y: (points[0].y + points[points.length - 1].y) / 2
+    };
+  }
+
+  const half = total / 2;
+  let walked = 0;
+  for (const seg of segments) {
+    if (walked + seg.len >= half) {
+      const t = seg.len > 0 ? (half - walked) / seg.len : 0;
+      return {
+        x: seg.a.x + (seg.b.x - seg.a.x) * t,
+        y: seg.a.y + (seg.b.y - seg.a.y) * t
+      };
+    }
+    walked += seg.len;
+  }
+
+  return points[points.length - 1];
+}
+
+async function fetchTransitRouteData(from, to) {
+  // Transit approximation with first/last mile walking:
+  // route path follows roads; total time includes transfer walking.
+  const road = await fetchRoadRoute(from, to, "transit");
+  if (!road || !road.path.length) return null;
+
+  const walkToStartKm = road.snappedStart ? haversineKm(from, road.snappedStart) : 0;
+  const walkFromEndKm = road.snappedEnd ? haversineKm(to, road.snappedEnd) : 0;
+  const walkingKm = walkToStartKm + walkFromEndKm;
+  const transitKm = road.distanceKm;
+
+  const transitMinutes = (transitKm / getVehicleSpeed("transit")) * 60;
+  const walkingMinutes = (walkingKm / getVehicleSpeed("walking")) * 60;
+  const totalMinutes = transitMinutes + walkingMinutes;
+
+  return {
+    icon: getVehicleIcon("transit"),
+    distanceKm: transitKm + walkingKm,
+    durationMinutes: totalMinutes,
+    distanceText: formatDistance(transitKm + walkingKm),
+    durationText: `${formatDuration(totalMinutes)} incl walk`,
+    path: road.path
+  };
+}
+
+async function fetchRoadRoute(from, to, vehicleType) {
+  const google = await requestGoogleRouteViaPage(from, to, vehicleType);
+  if (google && google.path?.length >= 2) return google;
+
+  const profile = mapVehicleToOsrmProfile(vehicleType);
+  return fetchOsrmRoute(profile, from, to);
+}
+
+async function fetchOsrmRoute(profile, from, to) {
+  const payload = await requestOsrmRoute(profile, from, to);
+  if (!payload) return null;
+
+  const route = payload?.routes?.[0];
+  if (!route || !route.geometry?.coordinates?.length) return null;
+
+  const rawPath = route.geometry.coordinates
+    .map((coord) => ({ lat: Number(coord[1]), lng: Number(coord[0]) }))
+    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+  const path = simplifyPath(rawPath, 64);
+  if (path.length < 2) return null;
+
+  const snappedStart = toLatLng(payload?.waypoints?.[0]?.location);
+  const snappedEnd = toLatLng(payload?.waypoints?.[1]?.location);
+
+  return {
+    distanceKm: (Number(route.distance) || 0) / 1000,
+    durationMinutes: (Number(route.duration) || 0) / 60,
+    path,
+    snappedStart,
+    snappedEnd
+  };
+}
+
+function toLatLng(location) {
+  if (!Array.isArray(location) || location.length < 2) return null;
+  const lng = Number(location[0]);
+  const lat = Number(location[1]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return { lat, lng };
+}
+
+function requestOsrmRoute(profile, from, to) {
+  return new Promise((resolve) => {
+    const fallbackFetch = () => {
+      fetchOsrmDirect(profile, from, to)
+        .then((data) => resolve(data))
+        .catch(() => resolve(null));
+    };
+
+    if (!chrome?.runtime?.id) {
+      fallbackFetch();
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        type: "MTP_FETCH_OSRM_ROUTE",
+        payload: { profile, from, to }
+      },
+      (response) => {
+        if (chrome.runtime.lastError || !response?.ok) {
+          fallbackFetch();
+          return;
+        }
+        resolve(response.data || null);
+      }
+    );
+  });
+}
+
+async function fetchOsrmDirect(profile, from, to) {
+  const url = `https://router.project-osrm.org/route/v1/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function requestGoogleRouteViaPage(from, to, vehicleType) {
+  return new Promise((resolve) => {
+    try {
+      ensureGoogleRouteBridge();
+    } catch {
+      resolve(null);
+      return;
+    }
+
+    const requestId = `gr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const timeout = setTimeout(() => {
+      window.removeEventListener("message", onMessage);
+      resolve(null);
+    }, 4500);
+
+    const onMessage = (event) => {
+      if (event.source !== window) return;
+      const message = event.data;
+      if (!message || message.type !== "MTP_GOOGLE_ROUTE_RESPONSE") return;
+      if (!message.payload || message.payload.requestId !== requestId) return;
+
+      clearTimeout(timeout);
+      window.removeEventListener("message", onMessage);
+
+      if (!message.payload.ok || !message.payload.data) {
+        resolve(null);
+        return;
+      }
+
+      const route = normalizeGoogleRoute(message.payload.data);
+      resolve(route);
+    };
+
+    window.addEventListener("message", onMessage);
+    window.postMessage(
+      {
+        type: "MTP_GOOGLE_ROUTE_REQUEST",
+        payload: { requestId, from, to, vehicleType }
+      },
+      "*"
+    );
+  });
+}
+
+function normalizeGoogleRoute(data) {
+  const rawPath = Array.isArray(data.path) ? data.path : [];
+  const path = simplifyPath(
+    rawPath
+      .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng) }))
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng)),
+    64
+  );
+  if (path.length < 2) return null;
+
+  return {
+    distanceKm: (Number(data.distanceMeters) || 0) / 1000,
+    durationMinutes: (Number(data.durationSeconds) || 0) / 60,
+    path,
+    snappedStart: path[0],
+    snappedEnd: path[path.length - 1]
+  };
+}
+
+function ensureGoogleRouteBridge() {
+  if (window.__mtp_google_route_bridge__) return;
+
+  const script = document.createElement("script");
+  script.dataset.mtpRouteBridge = "true";
+  script.textContent = `
+    (function () {
+      if (window.__mtp_google_route_bridge__) return;
+      window.__mtp_google_route_bridge__ = true;
+
+      function toMode(vehicleType) {
+        if (vehicleType === "walking") return "WALKING";
+        if (vehicleType === "biking") return "BICYCLING";
+        if (vehicleType === "transit") return "TRANSIT";
+        return "DRIVING";
+      }
+
+      window.addEventListener("message", function (event) {
+        if (event.source !== window) return;
+        var msg = event.data;
+        if (!msg || msg.type !== "MTP_GOOGLE_ROUTE_REQUEST") return;
+
+        var payload = msg.payload || {};
+        var requestId = payload.requestId;
+        var from = payload.from;
+        var to = payload.to;
+        var vehicleType = payload.vehicleType;
+
+        var respond = function (ok, data, error) {
+          window.postMessage(
+            {
+              type: "MTP_GOOGLE_ROUTE_RESPONSE",
+              payload: { requestId: requestId, ok: ok, data: data || null, error: error || null }
+            },
+            "*"
+          );
+        };
+
+        try {
+          if (!window.google || !window.google.maps || !window.google.maps.DirectionsService) {
+            respond(false, null, "Directions unavailable");
+            return;
+          }
+
+          var service = new window.google.maps.DirectionsService();
+          var modeName = toMode(vehicleType);
+          var travelMode = window.google.maps.TravelMode[modeName];
+
+          service.route(
+            {
+              origin: { lat: Number(from.lat), lng: Number(from.lng) },
+              destination: { lat: Number(to.lat), lng: Number(to.lng) },
+              travelMode: travelMode,
+              provideRouteAlternatives: false
+            },
+            function (result, status) {
+              if (status !== "OK" || !result || !result.routes || !result.routes.length) {
+                respond(false, null, String(status || "NO_ROUTE"));
+                return;
+              }
+
+              var route = result.routes[0];
+              var leg = route.legs && route.legs[0] ? route.legs[0] : null;
+              var path = (route.overview_path || []).map(function (p) {
+                return { lat: p.lat(), lng: p.lng() };
+              });
+
+              respond(true, {
+                distanceMeters: leg && leg.distance ? leg.distance.value : 0,
+                durationSeconds: leg && leg.duration ? leg.duration.value : 0,
+                path: path
+              });
+            }
+          );
+        } catch (error) {
+          respond(false, null, String((error && error.message) || error || "route_error"));
+        }
+      });
+    })();
+  `;
+
+  (document.documentElement || document.head || document.body).appendChild(script);
+  script.remove();
+  window.__mtp_google_route_bridge__ = true;
 }
 
 function closeGooglePlacePanelSoon() {

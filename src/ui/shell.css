@@ -228,7 +228,39 @@
 }
 
 .mtp-bulk-actions {
+  display: grid;
+  gap: 8px;
   margin: 0 0 10px;
+}
+
+.mtp-bulk-actions-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mtp-day-summary {
+  margin: 0 0 10px;
+  padding: 10px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+  border-radius: 10px;
+  display: grid;
+  gap: 4px;
+}
+
+.mtp-day-summary h3,
+.mtp-day-summary p {
+  margin: 0;
+}
+
+.mtp-day-summary h3 {
+  font-size: 13px;
+}
+
+.mtp-day-summary p {
+  font-size: 12px;
+  color: #334155;
 }
 
 .mtp-edge-editor {
@@ -398,9 +430,47 @@
   pointer-events: stroke;
 }
 
+.mtp-edge-focus {
+  fill: none;
+  stroke: rgba(59, 130, 246, 0.25);
+  stroke-width: 14;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.mtp-edge--driving {
+  stroke: #2563eb;
+}
+
+.mtp-edge--walking {
+  stroke: #16a34a;
+  stroke-dasharray: 10 8;
+}
+
+.mtp-edge--biking {
+  stroke: #ea580c;
+  stroke-dasharray: 6 5;
+}
+
+.mtp-edge--transit {
+  stroke: #0f766e;
+  stroke-dasharray: 14 8 4 8;
+}
+
+.mtp-edge--airplane {
+  stroke: #7c3aed;
+  stroke-dasharray: 16 8;
+}
+
 .mtp-edge--selected {
-  stroke: #1d4ed8;
   stroke-width: 6;
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgba(37, 99, 235, 0.65));
+}
+
+.mtp-edge--dimmed {
+  opacity: 0.18;
 }
 
 .mtp-edge-label-layer {
@@ -431,7 +501,39 @@
 
 .mtp-edge-label--selected {
   border-color: #2563eb;
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22), 0 4px 14px rgba(15, 23, 42, 0.18);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35), 0 6px 16px rgba(15, 23, 42, 0.24);
+}
+
+.mtp-edge-label--dimmed {
+  opacity: 0.28;
+}
+
+.mtp-edge-endpoints {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.mtp-edge-endpoint {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.3);
+  border: 2px solid #fff;
+  white-space: nowrap;
+}
+
+.mtp-edge-endpoint--start {
+  background: #0f766e;
+}
+
+.mtp-edge-endpoint--end {
+  background: #dc2626;
 }
 
 .mtp-marker {
