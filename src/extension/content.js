@@ -24546,11 +24546,16 @@
   }) {
     const [position, setPosition] = (0, import_react.useState)({ top: 84, left: 18 });
     const [isDragging, setIsDragging] = (0, import_react.useState)(false);
+    const [isPanelOpen, setIsPanelOpen] = (0, import_react.useState)(true);
+    const [openBtnPosition, setOpenBtnPosition] = (0, import_react.useState)({ top: 18, left: 18 });
+    const [isOpenBtnDragging, setIsOpenBtnDragging] = (0, import_react.useState)(false);
     const [draggedMarkerId, setDraggedMarkerId] = (0, import_react.useState)(null);
     const [dragOverMarkerId, setDragOverMarkerId] = (0, import_react.useState)(null);
     const [selectedForDelete, setSelectedForDelete] = (0, import_react.useState)([]);
     const panelRef = (0, import_react.useRef)(null);
     const dragRef = (0, import_react.useRef)(null);
+    const openBtnDragRef = (0, import_react.useRef)(null);
+    const openBtnMovedRef = (0, import_react.useRef)(false);
     const panelStyle = (0, import_react.useMemo)(
       () => ({ top: `${position.top}px`, left: `${position.left}px` }),
       [position.left, position.top]
@@ -24558,6 +24563,10 @@
     const visibleMarkers = (0, import_react.useMemo)(
       () => allMarkers.filter((m) => (Number(m.day) || 1) === (Number(activeDay) || 1)),
       [allMarkers, activeDay]
+    );
+    const openBtnStyle = (0, import_react.useMemo)(
+      () => ({ top: `${openBtnPosition.top}px`, left: `${openBtnPosition.left}px` }),
+      [openBtnPosition.left, openBtnPosition.top]
     );
     (0, import_react.useEffect)(() => {
       const markerIds = new Set(allMarkers.map((m) => m.id));
@@ -24637,8 +24646,66 @@
     const handleClearSelected = () => {
       setSelectedForDelete([]);
     };
+    const closePanel = () => {
+      setOpenBtnPosition({
+        top: Math.max(MIN_MARGIN, position.top),
+        left: Math.max(MIN_MARGIN, position.left)
+      });
+      setIsPanelOpen(false);
+    };
+    const onOpenBtnPointerDown = (event) => {
+      if (event.button !== 0) return;
+      openBtnMovedRef.current = false;
+      openBtnDragRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        offsetX: event.clientX - openBtnPosition.left,
+        offsetY: event.clientY - openBtnPosition.top
+      };
+      setIsOpenBtnDragging(true);
+      event.preventDefault();
+    };
+    (0, import_react.useEffect)(() => {
+      if (!isOpenBtnDragging) return void 0;
+      const onMove = (event) => {
+        if (!openBtnDragRef.current) return;
+        const distance = Math.hypot(
+          event.clientX - openBtnDragRef.current.startX,
+          event.clientY - openBtnDragRef.current.startY
+        );
+        if (distance > 4) openBtnMovedRef.current = true;
+        const nextLeft = clamp(event.clientX - openBtnDragRef.current.offsetX, MIN_MARGIN, window.innerWidth - 140);
+        const nextTop = clamp(event.clientY - openBtnDragRef.current.offsetY, MIN_MARGIN, window.innerHeight - 44);
+        setOpenBtnPosition({ top: nextTop, left: nextLeft });
+      };
+      const onUp = () => {
+        openBtnDragRef.current = null;
+        setIsOpenBtnDragging(false);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+      return () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      };
+    }, [isOpenBtnDragging]);
     return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+      !isPanelOpen ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+        "button",
+        {
+          type: "button",
+          className: `mtp-open-panel-btn${isOpenBtnDragging ? " mtp-open-panel-btn--dragging" : ""}`,
+          style: openBtnStyle,
+          onPointerDown: onOpenBtnPointerDown,
+          onClick: () => {
+            if (openBtnMovedRef.current) return;
+            setIsPanelOpen(true);
+          },
+          children: "Open Planner"
+        }
+      ) : /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
         "aside",
         {
           className: `mtp-panel${isDragging ? " mtp-panel--dragging" : ""}${paused ? " mtp-panel--paused" : ""}`,
@@ -24649,6 +24716,16 @@
             /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("header", { className: "mtp-panel__header", onPointerDown, children: [
               /* @__PURE__ */ (0, import_jsx_runtime.jsx)("h1", { children: "Travel Planner Pro" }),
               /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { className: "mtp-toolbar", children: [
+                /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    className: "mtp-btn",
+                    onClick: closePanel,
+                    title: "Close planner panel",
+                    children: "Close"
+                  }
+                ),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", { type: "button", className: "mtp-btn", onClick: onTogglePause, children: paused ? "Resume" : "Pause" }),
                 /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
                   "button",

@@ -55,11 +55,16 @@ export function PlannerShell({
 }) {
   const [position, setPosition] = useState({ top: 84, left: 18 });
   const [isDragging, setIsDragging] = useState(false);
+  const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [openBtnPosition, setOpenBtnPosition] = useState({ top: 18, left: 18 });
+  const [isOpenBtnDragging, setIsOpenBtnDragging] = useState(false);
   const [draggedMarkerId, setDraggedMarkerId] = useState(null);
   const [dragOverMarkerId, setDragOverMarkerId] = useState(null);
   const [selectedForDelete, setSelectedForDelete] = useState([]);
   const panelRef = useRef(null);
   const dragRef = useRef(null);
+  const openBtnDragRef = useRef(null);
+  const openBtnMovedRef = useRef(false);
 
   const panelStyle = useMemo(
     () => ({ top: `${position.top}px`, left: `${position.left}px` }),
@@ -69,6 +74,11 @@ export function PlannerShell({
   const visibleMarkers = useMemo(
     () => allMarkers.filter((m) => (Number(m.day) || 1) === (Number(activeDay) || 1)),
     [allMarkers, activeDay]
+  );
+
+  const openBtnStyle = useMemo(
+    () => ({ top: `${openBtnPosition.top}px`, left: `${openBtnPosition.left}px` }),
+    [openBtnPosition.left, openBtnPosition.top]
   );
 
   useEffect(() => {
@@ -169,8 +179,75 @@ export function PlannerShell({
     setSelectedForDelete([]);
   };
 
+  const closePanel = () => {
+    setOpenBtnPosition({
+      top: Math.max(MIN_MARGIN, position.top),
+      left: Math.max(MIN_MARGIN, position.left)
+    });
+    setIsPanelOpen(false);
+  };
+
+  const onOpenBtnPointerDown = (event) => {
+    if (event.button !== 0) return;
+    openBtnMovedRef.current = false;
+    openBtnDragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: event.clientX - openBtnPosition.left,
+      offsetY: event.clientY - openBtnPosition.top
+    };
+    setIsOpenBtnDragging(true);
+    event.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isOpenBtnDragging) return undefined;
+
+    const onMove = (event) => {
+      if (!openBtnDragRef.current) return;
+      const distance = Math.hypot(
+        event.clientX - openBtnDragRef.current.startX,
+        event.clientY - openBtnDragRef.current.startY
+      );
+      if (distance > 4) openBtnMovedRef.current = true;
+
+      const nextLeft = clamp(event.clientX - openBtnDragRef.current.offsetX, MIN_MARGIN, window.innerWidth - 140);
+      const nextTop = clamp(event.clientY - openBtnDragRef.current.offsetY, MIN_MARGIN, window.innerHeight - 44);
+      setOpenBtnPosition({ top: nextTop, left: nextLeft });
+    };
+
+    const onUp = () => {
+      openBtnDragRef.current = null;
+      setIsOpenBtnDragging(false);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+    };
+  }, [isOpenBtnDragging]);
+
   return (
     <>
+      {!isPanelOpen ? (
+        <button
+          type="button"
+          className={`mtp-open-panel-btn${isOpenBtnDragging ? " mtp-open-panel-btn--dragging" : ""}`}
+          style={openBtnStyle}
+          onPointerDown={onOpenBtnPointerDown}
+          onClick={() => {
+            if (openBtnMovedRef.current) return;
+            setIsPanelOpen(true);
+          }}
+        >
+          Open Planner
+        </button>
+      ) : (
       <aside
         className={`mtp-panel${isDragging ? " mtp-panel--dragging" : ""}${paused ? " mtp-panel--paused" : ""}`}
         ref={panelRef}
@@ -180,6 +257,14 @@ export function PlannerShell({
         <header className="mtp-panel__header" onPointerDown={onPointerDown}>
           <h1>Travel Planner Pro</h1>
           <div className="mtp-toolbar">
+            <button
+              type="button"
+              className="mtp-btn"
+              onClick={closePanel}
+              title="Close planner panel"
+            >
+              Close
+            </button>
             <button type="button" className="mtp-btn" onClick={onTogglePause}>
               {paused ? "Resume" : "Pause"}
             </button>
@@ -456,6 +541,7 @@ export function PlannerShell({
           </div>
         </section>
       </aside>
+      )}
 
       <div className="mtp-marker-layer">
         <svg className="mtp-edge-layer" aria-hidden="true">

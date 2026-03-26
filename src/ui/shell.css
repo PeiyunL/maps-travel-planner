@@ -28,6 +28,27 @@
   z-index: 20;
 }
 
+.mtp-open-panel-btn {
+  position: fixed;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 14px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.2);
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 22;
+  user-select: none;
+  touch-action: none;
+}
+
+.mtp-open-panel-btn--dragging {
+  cursor: grabbing;
+}
+
 .mtp-panel--dragging {
   cursor: grabbing;
   user-select: none;
